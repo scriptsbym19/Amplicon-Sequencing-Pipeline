@@ -154,7 +154,235 @@ dim(asvtable.nochim)
 sum(asvtable.nochim)/sum(asvtable)
 ```
 
+The second number of the results should be a decimal that can be converted to a percent. This tells you that 44% of the reads were quality reads and that the remaining 56% were chimeras and needed to be removed
+
+Next, we will assess the number of sequences as they were throughout every step of the pipeline. This number should decrease through each of the trimming, pairing and filtering steps
+
+```{}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(asvtable.nochim))
+```
+
+This step assigns names to all of the columns and prints it so it can be viewed and analyzed:
+
+```{}
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+```
+
+Next, we need to assign taxonomy to the sequences:
+
+```{}
+phyla <- assignTaxonomy(asvtable.nochim, "path/to/your/database", multithread=FALSE)
+```
+
+Now we can view the assignments created in the last step:
+
+```{}
+phyla.print <- phyla
+```
+
+This extracts the row names of the sequences we want to view:
+
+```{}
+rownames(phyla.print) <- NULL
+head(phyla.print)
+```
+
+# Step Two: Saving Data Up to This Point 
+STOP HERE! This is an important spot to stop and save your work up until this point to prevent losing any of your files. This is a good stopping point. 
+
+First, save the dataframe that assigns taxonomy to each ASV:
+```{}
+write.csv(phyla, file=“your/directory/path/phyla_A3.csv”)
+```
+
+Next, save the table that displayed the abundance of the chimeras:
+
+```{}
+write.csv(asvtable.nochim,file=“your/directory/path/asvtable.nochim_A3.csv”)
+```
+
+This saves the tracking table that displays the sequences from each step along the pipeline and how many were lost between each step:
+
+```{}
+write.csv(track,file=“your/directory/path/tracking_A3.csv”) 
+```
+
+# Step Three: Preparing the Data for Plotting
+We will start from the saved CSV files. We are reading all the saved files into the environment as objects so that they can be used to create a plot.
+Some of the following steps are for prepping data for your viewing convenience later and are not mandatory. Read through the steps carefully but skip ahead to Step Four if you are looking to skip to plotting with phyloseq 
+
+```{}
+phyla <- read.csv(file = 'your/path/to/phyla_A3.csv')
+asvtable.nochim <- read.csv(file = 'your/path/to/asvtable.nochim_A3.csv', header = FALSE)
+track <- read.csv(file = 'your/path/to/tracking_A3.csv')
+```
+
+Here, we will correct the formatting of the objects so that they can be used to make plots through a few steps of flipping and moving or deleting rows and columns. Each step is followed by a view to verify that the step worked which are optional, but recommended here
+
+```{}
+flipped_asvtable.nochim<-as.data.frame(t(asvtable.nochim))
+View(flipped_asvtable.nochim)
+```
+
+In the flipped CSV, column V1 row V1 is blank, so next we're going to copy the first row into the header and then delete the first row in the next two steps
+Step 1 is to copy the first row:
+
+```{}
+colnames(flipped_asvtable.nochim) <- flipped_asvtable.nochim[1,]
+```
+
+This is saying that the column names should be the names in the 1st row in the flipped ASV table and replacing the placeholders with the actual names. Now we can view to verify it worked.
+
+```{}
+View(flipped_asvtable.nochim)
+```
+
+Step 2 is to now delete the first row and inspect agan to ensure it is correct:
+
+```{}
+flipped_asvtable.nochim <- flipped_asvtable.nochim[-1,]
+View(flipped_asvtable.nochim)
+```
+
+Next, we will change the names of the sequences to 'ASVs' rather than the sequences themselves. We will change all the sequences in the first row to 'ASV1, 2, etc.' so we can always go back and reference which ASV corresponded with which taxonomic name. This is a nice-to-do-step, not a mandatory step but it makes it look nice
+
+```{}
+rownames(flipped_asvtable.nochim) <- paste0("ASV", 1:nrow(flipped_asvtable.nochim))
+```
+
+Now remove the sequences column and save it:
+
+```{}
+flipped_asvtable.nochim_forself <- flipped_asvtable.nochim[,-1]
+```
+
+This transposed file can be saved in case it is useful later and now it is formatted nicely 
+
+```{}
+write.csv(flipped_asvtable.nochim, file = 'your/path/to/save/flipped_asvtable.nochim.csv')
+write.csv(flipped_asvtable.nochim_forself, file ='your/path/to/save/flipped_asvtable.nochim_forself.csv')
+```
+
+Now, the flipped data can be saved in one data sheet for yourself using the cbind function. Ensure you have verified your directory before this step
+
+```{}
+ASVabund<-cbind(flipped_asvtable.nochim,phyla)
+write.csv(ASVabund,file='your/path/to/save/ASVabund.csv')
+```
+
+# Step Four: Plotting with Phyloseq and ggplot2
+After all the adjustments we made, phyloseq does not like the sequences in column 1 of the final product so we will remove it and view it one more time to verify before beginning the next step
+
+```{}
+phyla<-phyla[-1]
+View(phyla)
+```
+
+STOP HERE! Confirm that you have loaded all your required libraries for the Phyloseq library:
+
+```{}
+library(phyloseq)
+library(Biostrings)
+library(ggplot2)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+We are going to format an object using the phyla data and phyloseq's preferred formatting for analysis. This step will name and create a matrix using the phyla data
+
+```{}
+phylamatrix<-as.matrix(phyla)
+```
+
+Now, we will make an ASV table in phyloseq formatting using flipped_asvtable.nochim. Here, we are creating and naming the new object while removing the first column that does not fit the phyloseq formatting and viewing it to verify the step 
+
+```{}
+otumatrix <-flipped_asvtable.nochim[,-1]
+view(otumatrix)
+```
+
+Next, we want to convert the object to a matrix format. Since a matrix can only store one type of data, we will have one OTU (ASV) table and one for the phyla:
+
+```{}
+otumatrix<-as.matrix(otumatrix)
+phylamatrix<-as.matrix(phylamatrix)
+```
+
+Now, we need to ensure that the row names are 'ASV' for both files:
+
+```{}
+rownames(otumatrix) <- paste0("ASV", 1:nrow(otumatrix))
+rownames(phylamatrix) <- paste0("ASV", 1:nrow(otumatrix))
+```
+
+Next, we need to ensure that the OTU data is recognized as numeric, not character data:
+
+```{}
+class(otumatrix)<-"numeric"
+```
+
+Now that we have completed all the formatting, we can use phyloseq to analyze the data. We will use the following commands to tell phyloseq where the OTU and phyla files are, where the data is located, combine the files and print to view:
+
+```{}
+OTU=otu_table(otumatrix,taxa_are_rows = TRUE)
+PHYLA=tax_table(phylamatrix)
+physeq=phyloseq(OTU,PHYLA)
+physeq
+```
+
+Assign an object with the correct data for ease of use in the next plotting steps:
+
+```{}
+sample_names(physeq)
+sample_names<-sample_names(physeq)
+```
+
+STOP HERE! This portion should be typed in the console if you want the plot to appear in the plots window for proper viewing. First, let's merge the ASVs of each phyla together so easier to interpret the plot. We'll use 'tax_glom' to glom together the taxa in the phyla column
+
+```{}
+ps_phylum <- tax_glom(physeq, "Phylum")
+```
+
+Next, this glommed data can be used to display the relative abundance of each phylum. Then, we use psmelt to melt away the phyloseq formatting and make it easier for plotting using ggplot2, and we factor the values of Phylum
+
+```{}
+ps_phylum_relabun <- transform_sample_counts(ps_phylum, function(ASV) ASV/sum(ASV))
+taxa_abundance_table_phylum <- psmelt(ps_phylum_relabun)
+taxa_abundance_table_phylum$Phylum<-factor(taxa_abundance_table_phylum$Phylum)
+```
+
+Now we can (finally) plot the data. First we create a title so we can use it in our plot line. Then we create a plot as an object (Or you can omit the name <- to just generate the plot and not save it to your environment)
+
+```{}
+title = "Relative Abundance of Phyla in Pumice Rock Samples in the South Pacific Ocean"
+p_realabun<-plot_bar(ps_phylum_relabun, fill = "Phylum", title=title) + ylab("Relative Abundance (%)")
+```
+And you're done!
+
+# Additional Steps
+OR what if you wanted to use this same data to make a plot of relative abundance for order instead of phyla? We'll follow all the same steps as before but substituting for another type of data within the same data set to create a new plot, starting with formatting:
 
 
+```{}
+ordermatrix<-as.matrix(phyla$Order)
+rownames(ordermatrix) <- paste0("ASV", 1:nrow(otumatrix))
+ORDER=tax_table(ordermatrix)
+ordseq=phyloseq(OTU,ORDER)
+sample_names(ordseq)
+```
 
+```{}
+order_names<-sample_names(ordseq)
+ps_order <- tax_glom(physeq, "Order")
+ps_order_relabun <- transform_sample_counts(ps_order, function(ASV) ASV/sum(ASV))
+taxa_abundance_table_order <- psmelt(ps_order_relabun)
+taxa_abundance_table_phylum$Phylum<-factor(taxa_abundance_table_phylum$Phylum)
+title2 = "Relative Abundance of Orders in Pumice Rock Samples in South Pacific Ocean"
+o_realabun <- plot_bar(ps_order_relabun, fill = "Order", title=title2) + ylab("Relative Abundance (%)")
+o_realabun
+```
 
+NOW we're done :)
